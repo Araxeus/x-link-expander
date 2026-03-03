@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "X Link Expander",
-  "description": "Redirects t.co shortened URLs to expandurl.net for expansion, useful when t.co domains don't resolve on your network.",
+  "description": "Automatically expands t.co shortened URLs to their actual destination, useful when t.co domains don't resolve on your network.",
   "version": "1.0.0",
   "permissions": ["webNavigation", "tabs", "storage", "offscreen"],
   "host_permissions": ["https://t.co/*", "http://t.co/*", "https://www.expandurl.net/*", "http://www.expandurl.net/*"],
