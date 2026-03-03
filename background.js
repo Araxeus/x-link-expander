@@ -1,4 +1,4 @@
-//const REDIRECT_BASE = 'https://www.expandurl.net/ext?url=';
+const FALLBACK_BASE = 'https://www.expandurl.net/ext?url=';
 
 // A function to create the offscreen document if it doesn't exist
 async function setupOffscreenDocument() {
@@ -8,7 +8,7 @@ async function setupOffscreenDocument() {
     );
     await chrome.offscreen.createDocument({
         url: 'offscreen.html',
-        reasons: ['DOM_PARSER'], // Specify the reason for creation
+        reasons: ['DOM_PARSER'],
         justification: 'Parsing fetched HTML content',
     });
 }
@@ -54,24 +54,66 @@ function isTcoUrl(url) {
     }
 }
 
+function getLoadingUrl(originalUrl) {
+    return chrome.runtime.getURL(
+        `loading.html?url=${encodeURIComponent(originalUrl)}`,
+    );
+}
+
+function getErrorLoadingUrl(originalUrl, errorMessage) {
+    const fallbackUrl = FALLBACK_BASE + encodeURIComponent(originalUrl);
+    return chrome.runtime.getURL(
+        `loading.html?url=${encodeURIComponent(originalUrl)}&error=${encodeURIComponent(errorMessage)}&fallback=${encodeURIComponent(fallbackUrl)}`,
+    );
+}
+
 async function redirectTab(tabId, originalUrl) {
     // Deduplicate: if we've already redirected this tab, skip it.
     if (redirectedTabs.has(tabId)) return;
     redirectedTabs.add(tabId);
 
-    const redirectUrl = await resolveRedirectUrl(originalUrl); //REDIRECT_BASE + originalUrl;
+    // Immediately show the loading page so the user doesn't stare at a DNS error
+    const loadingUrl = getLoadingUrl(originalUrl);
     console.log(
-        `[x-link-expander] Redirecting tab ${tabId}: ${originalUrl} -> ${redirectUrl}`,
+        `[x-link-expander] Showing loading page for tab ${tabId}: ${originalUrl}`,
     );
     try {
-        await chrome.tabs.update(tabId, { url: redirectUrl });
+        await chrome.tabs.update(tabId, { url: loadingUrl });
+    } catch (err) {
+        console.warn(
+            `[x-link-expander] Failed to open loading page for tab ${tabId}:`,
+            err,
+        );
+        redirectedTabs.delete(tabId);
+        return;
+    }
+
+    // Now resolve the actual destination URL in the background
+    try {
+        const resolvedUrl = await resolveRedirectUrl(originalUrl);
+        console.log(
+            `[x-link-expander] Resolved tab ${tabId}: ${originalUrl} -> ${resolvedUrl}`,
+        );
+
+        if (!resolvedUrl) {
+            throw new Error('Resolved URL was empty');
+        }
+
+        // Navigate the tab directly to the resolved URL
+        await chrome.tabs.update(tabId, { url: resolvedUrl });
 
         // Track redirect count
         const { redirectCount = 0 } =
             await chrome.storage.local.get('redirectCount');
         await chrome.storage.local.set({ redirectCount: redirectCount + 1 });
     } catch (err) {
-        console.warn(`[x-link-expander] Failed to redirect tab ${tabId}:`, err);
+        console.warn(
+            `[x-link-expander] Failed to resolve ${originalUrl}:`,
+            err,
+        );
+        // Navigate to the loading page again but with error params baked into the URL
+        const errorUrl = getErrorLoadingUrl(originalUrl, err.message);
+        await chrome.tabs.update(tabId, { url: errorUrl }).catch(() => {});
     } finally {
         // Clean up after a short delay so that other listeners for the same
         // navigation are still suppressed, but future navigations in this
