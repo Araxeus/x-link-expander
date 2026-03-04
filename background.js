@@ -99,6 +99,22 @@ async function redirectTab(tabId, originalUrl) {
             throw new Error('Resolved URL was empty');
         }
 
+        // Validate that the resolved URL is an absolute http(s) URL.
+        // Relative paths or other schemes (e.g. chrome-extension://) must
+        // not be navigated to — they indicate a malformed redirect chain.
+        try {
+            const parsed = new URL(resolvedUrl);
+            if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+                throw new Error(
+                    `Resolved URL has unsupported scheme: ${parsed.protocol}`,
+                );
+            }
+        } catch {
+            throw new Error(
+                `Resolved URL is not a valid absolute URL: ${resolvedUrl}`,
+            );
+        }
+
         // Navigate the tab directly to the resolved URL
         await chrome.tabs.update(tabId, { url: resolvedUrl });
 
